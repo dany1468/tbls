@@ -161,14 +161,21 @@ SELECT
   i.is_unique,
   i.is_primary_key,
   i.is_unique_constraint,
-  STRING_AGG(COL_NAME(ic.object_id, ic.column_id), ', ') WITHIN GROUP ( ORDER BY ic.key_ordinal ),
+  IndexColumnName = COALESCE(STUFF
+	(
+	  (
+		SELECT ', ' + COL_NAME(ic.object_id, ic.column_id)
+		  FROM sys.index_columns AS ic
+		  WHERE i.object_id = ic.object_id AND i.index_id = ic.index_id
+		  ORDER BY ic.key_ordinal
+		  FOR XML PATH('')
+	  ), 1, 2, N''
+	), N''),
   c.is_system_named
 FROM sys.key_constraints AS c
 LEFT JOIN sys.indexes AS i ON i.object_id = c.parent_object_id AND i.index_id = c.unique_index_id
-INNER JOIN sys.index_columns AS ic
-ON i.object_id = ic.object_id AND i.index_id = ic.index_id
 WHERE i.object_id = object_id($1)
-GROUP BY c.name, i.index_id, i.type_desc, i.is_unique, i.is_primary_key, i.is_unique_constraint, c.is_system_named
+GROUP BY c.name, i.object_id, i.index_id, i.type_desc, i.is_unique, i.is_primary_key, i.is_unique_constraint, c.is_system_named
 ORDER BY i.index_id
 `, fmt.Sprintf("%s.%s", tableSchema, tableName))
 		if err != nil {
@@ -222,15 +229,30 @@ SELECT
   f.name AS f_name,
   object_name(f.parent_object_id) AS table_name,
   object_name(f.referenced_object_id) AS parent_table_name,
-  STRING_AGG(COL_NAME(fc.parent_object_id, fc.parent_column_id), ', ') AS column_names,
-  STRING_AGG(COL_NAME(fc.referenced_object_id, fc.referenced_column_id), ', ') AS parent_column_names,
+  column_names = COALESCE(STUFF
+  (
+    (
+      SELECT ', ' + COL_NAME(fc.parent_object_id, fc.parent_column_id)
+        FROM sys.foreign_key_columns AS fc
+        WHERE f.object_id = fc.constraint_object_id
+        FOR XML PATH('')
+    ), 1, 2, N''
+  ), N''),
+  parent_column_names = COALESCE(STUFF
+  (
+    (
+      SELECT ', ' + COL_NAME(fc.referenced_object_id, fc.referenced_column_id)
+        FROM sys.foreign_key_columns AS fc
+        WHERE f.object_id = fc.constraint_object_id
+        FOR XML PATH('')
+    ), 1, 2, N''
+  ), N''),
   update_referential_action_desc,
   delete_referential_action_desc,
   f.is_system_named
 FROM sys.foreign_keys AS f
-LEFT JOIN sys.foreign_key_columns AS fc ON f.object_id = fc.constraint_object_id
 WHERE f.parent_object_id = object_id($1)
-GROUP BY f.name, f.parent_object_id, f.referenced_object_id, delete_referential_action_desc, update_referential_action_desc, f.is_system_named
+GROUP BY f.name, f.object_id, f.parent_object_id, f.referenced_object_id, delete_referential_action_desc, update_referential_action_desc, f.is_system_named
 `, fmt.Sprintf("%s.%s", tableSchema, tableName))
 		if err != nil {
 			return errors.WithStack(err)
@@ -342,15 +364,23 @@ SELECT
   i.is_unique,
   i.is_primary_key,
   i.is_unique_constraint,
-  STRING_AGG(COL_NAME(ic.object_id, ic.column_id), ', ') WITHIN GROUP ( ORDER BY ic.key_ordinal ),
+  IndexColumnName = COALESCE(STUFF
+  (
+    (
+      SELECT ', ' + COL_NAME(ic.object_id, ic.column_id)
+        FROM sys.index_columns AS ic
+        WHERE i.object_id = ic.object_id AND i.index_id = ic.index_id
+        ORDER BY ic.key_ordinal
+        FOR XML PATH('')
+    ), 1, 2, N''
+  ), N''),
   c.is_system_named
 FROM sys.indexes AS i
-INNER JOIN sys.index_columns AS ic
-ON i.object_id = ic.object_id AND i.index_id = ic.index_id
 LEFT JOIN sys.key_constraints AS c
 ON i.object_id = c.parent_object_id AND i.index_id = c.unique_index_id
 WHERE i.object_id = object_id($1)
-GROUP BY i.name, i.index_id, i.type_desc, i.is_unique, i.is_primary_key, i.is_unique_constraint, c.is_system_named
+AND i.type_desc <> 'HEAP' -- for Tables without Cloustered Indexes
+GROUP BY i.name, i.object_id, i.index_id, i.type_desc, i.is_unique, i.is_primary_key, i.is_unique_constraint, c.is_system_named
 ORDER BY i.index_id
 `, fmt.Sprintf("%s.%s", tableSchema, tableName))
 		if err != nil {
